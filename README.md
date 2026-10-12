@@ -18,3 +18,4 @@ graph LR
     B --> C[Almacenamiento]
     C --> D[Procesamiento]
     D --> E[Visualización / modelo]# bigdata-p1-itaca
+# bigdata-p1-itaca
