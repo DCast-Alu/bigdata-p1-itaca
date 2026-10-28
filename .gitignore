@@ -1,7 +1,11 @@
 # Datos y credenciales
 data/raw/
+data/exportaciones/
 data/*.csv
 data/*.json
+data/*.xml
+data/**/*.xml
+data/**/*.json
 .env
 *.pem
 
@@ -21,3 +25,6 @@ site/
 
 # Mac
 .DS_Store
+
+# Memoria de trabajo IA
+/IA/
