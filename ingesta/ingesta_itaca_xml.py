@@ -29,7 +29,7 @@ import xml.etree.ElementTree as ET
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
 RAIZ_PROYECTO = Path(__file__).resolve().parents[1]
 DIRECTORIO_EXPORTACIONES = RAIZ_PROYECTO / "data" / "exportaciones"
@@ -109,6 +109,37 @@ def guardar(datos: List[Dict[str, str]], directorio: Path, tabla: str) -> Path:
     return ruta
 
 
+def leer_codigos_grupos(ruta: Path) -> Optional[Set[str]]:
+    """Códigos de grupos.xml, solo para validar (grupos no se ingesta).
+
+    Devuelve None si el fichero no se puede leer; la ingesta sigue igualmente.
+    """
+    try:
+        contenedor = ET.parse(ruta).getroot().find("grupos")
+        if contenedor is None:
+            raise ValueError("no contiene el nodo <grupos>")
+        return {n.attrib.get("codigo", "").strip() for n in contenedor} - {""}
+    except FileNotFoundError:
+        logger.warning("No se encuentra %s: no se validan los grupos", ruta)
+    except (ET.ParseError, ValueError, OSError) as exc:
+        logger.warning("No se puede leer %s (%s): no se validan los grupos", ruta, exc)
+    return None
+
+
+def validar_grupos(curso: str, alumnos: List[Dict[str, str]], grupos: Set[str]) -> int:
+    """Paso 5: todo grupo de alumnos existe en grupos. Devuelve nº de avisos."""
+    sin_grupo = sum(1 for a in alumnos if not a["grupo"])
+    inexistentes = sorted({a["grupo"] for a in alumnos
+                           if a["grupo"] and a["grupo"] not in grupos})
+    if inexistentes:
+        logger.warning("%s: %d grupos de alumnos no están en grupos.xml: %s",
+                       curso, len(inexistentes), ", ".join(inexistentes))
+        return 1
+    logger.info("%s: todos los grupos de alumnos existen en grupos.xml "
+                "(%d alumnos sin grupo asignado)", curso, sin_grupo)
+    return 0
+
+
 def validar_claves(curso: str, datos: Dict[str, List[Dict[str, str]]]) -> int:
     """Paso 5: comprueba las referencias de calificaciones. Devuelve nº de avisos."""
     if not {"alumnos", "contenidos", "calificaciones"} <= datos.keys():
@@ -145,7 +176,12 @@ def comprobar_sin_datos_reales(ficheros: List[Path], nias_reales: set) -> bool:
     """Paso 5: verifica que la salida no contiene datos identificativos."""
     correcto = True
     for ruta in ficheros:
-        registros = json.loads(ruta.read_text(encoding="utf-8"))
+        try:
+            registros = json.loads(ruta.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            correcto = False
+            logger.error("No se puede comprobar %s: %s", ruta, exc)
+            continue
         claves = set().union(*(r.keys() for r in registros)) if registros else set()
         prohibidas = claves & CAMPOS_PROHIBIDOS
         if prohibidas:
@@ -215,6 +251,12 @@ def main() -> int:
                 errores += 1
                 logger.error("Error procesando %s: %s", ruta, exc)
         avisos += validar_claves(carpeta.name, datos)
+        if "alumnos" in datos:
+            grupos = leer_codigos_grupos(carpeta / "grupos.xml")
+            if grupos is None:
+                avisos += 1
+            else:
+                avisos += validar_grupos(carpeta.name, datos["alumnos"], grupos)
 
     if not comprobar_sin_datos_reales(generados, nias_reales):
         errores += 1
@@ -225,4 +267,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        logger.warning("Ingesta interrumpida por el usuario: los ficheros de "
+                       "data/raw pueden estar incompletos, vuelve a ejecutarla")
+        raise SystemExit(130)

@@ -28,3 +28,6 @@ site/
 
 # Memoria de trabajo IA
 /IA/
+
+# Pruebas locales (no se suben)
+/pruebas/
